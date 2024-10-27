@@ -1,0 +1,147 @@
+-- This is used for querying the cleaned data using hive.
+
+DROP TABLE tracks;
+DROP TABLE track_artists;
+
+CREATE TABLE IF NOT EXISTS tracks (
+    index INT,
+    track_id STRING,
+    artists STRING,
+    album_name STRING,
+    track_name STRING,
+    popularity INT,
+    duration_ms INT,
+    explicit STRING,
+    danceability FLOAT,
+    energy FLOAT,
+    key INT,
+    loudness FLOAT,
+    mode INT,
+    speechiness FLOAT,
+    acousticness FLOAT,
+    instrumentalness FLOAT,
+    liveness FLOAT,
+    valence FLOAT,
+    tempo FLOAT,
+    time_signature FLOAT,
+    track_genre STRING
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t'
+LINES TERMINATED BY '\n'
+STORED AS TEXTFILE;
+
+LOAD DATA LOCAL INPATH '/home/bartek/University/DataSpeedScale/Assignment_1/hive_data/deduped_tracks/part-r-00000.tsv'
+INTO TABLE tracks;
+
+CREATE TABLE IF NOT EXISTS track_artists(
+    track_id STRING,
+    artist STRING
+)
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t'
+LINES TERMINATED BY '\n'
+STORED AS TEXTFILE;
+
+LOAD DATA LOCAL INPATH '/home/bartek/University/DataSpeedScale/Assignment_1/hive_data/split_artists/part-r-00000.tsv'
+INTO TABLE track_artists;
+
+-- Query 1: What are the albums with the top 5 most number of unqiue songs
+
+SELECT album_name, COUNT(track_name) as total_track_count
+FROM tracks
+GROUP by album_name
+ORDER BY total_track_count DESC
+LIMIT 5;
+
+-- -- Results are as follows:
+-- -- The Complete Hank Williams      110
+-- -- Greatest Hits   77
+-- -- Mozart: A Night of Classics     74
+-- -- Hans Zimmer: Epic Scores        68
+-- -- Mozart - All Day Classics       54
+
+-- -- This matches the results seen in the pig_queries
+
+
+-- -- Query 2: Which are the top 5 most popular explicit tracks and list the track_name, album name and popularity score
+SELECT track_name, album_name, popularity
+FROM tracks
+WHERE explicit == 'True'
+ORDER BY popularity DESC
+LIMIT 5;
+
+-- Results are as follows:
+-- I'm Good (Blue) I'm Good (Blue) 98
+-- Me Porto Bonito Un Verano Sin Ti        97
+-- Under The Influence     Indigo (Extended)       96
+-- Moscow Mule     Un Verano Sin Ti        94
+-- CUFF IT RENAISSANCE     93
+
+
+-- Query 3: (Complex Join) Which artists have the most unique genres in their song catalogue
+
+INSERT OVERWRITE LOCAL DIRECTORY '/home/bartek/University/DataSpeedScale/Assignment_1/results/unique_genres'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t'
+
+SELECT a.artist, COUNT(DISTINCT t.track_genre) AS unique_genre_count
+FROM track_artists a
+JOIN tracks t
+ON a.track_id = t.track_id
+GROUP BY a.artist
+ORDER BY unique_genre_count DESC;
+
+-- Query 4: (Hive Function) Which genres have the highest/lowest average danceability across all of their songs?
+
+INSERT OVERWRITE LOCAL DIRECTORY '/home/bartek/University/DataSpeedScale/Assignment_1/results/genre_danceability'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t'
+
+SELECT track_genre, AVG(danceability) as avg_danceability
+FROM tracks
+GROUP BY track_genre
+ORDER BY avg_danceability;
+
+-- Bottom 5
+-- sleep   0.16735534416462378
+-- grindcore       0.2723726994453113
+-- black-metal     0.29025449614289783
+-- iranian 0.300049380025988
+-- opera   0.3070057693919445
+
+-- Top 5
+-- dancehall       0.7325073631014052
+-- latino  0.7482587847465905
+-- reggaeton       0.7569879025461212
+-- chicago-house   0.7676330181201049
+-- kids    0.7820696685411284
+
+
+-- Query 5: Using a random 10% sample of the original data, see if there are tempo 
+-- differences between explicit and non-explicit music
+
+
+INSERT OVERWRITE LOCAL DIRECTORY '/home/bartek/University/DataSpeedScale/Assignment_1/results/tempo_explicit_sample'
+ROW FORMAT DELIMITED
+FIELDS TERMINATED BY '\t'
+
+SELECT 
+    explicit,
+    tempo_range,
+    COUNT(*) AS track_count
+FROM (
+    SELECT 
+        explicit,
+        CASE 
+            WHEN tempo < 60 THEN '0-60 BPM'
+            WHEN tempo < 90 THEN '60-90 BPM'
+            WHEN tempo < 120 THEN '90-120 BPM'
+            WHEN tempo < 150 THEN '120-150 BPM'
+            WHEN tempo < 180 THEN '150-180 BPM'
+            ELSE '180+ BPM'
+        END AS tempo_range
+    FROM tracks TABLESAMPLE(10 PERCENT)
+) AS track_sample
+GROUP BY explicit, tempo_range
+ORDER BY explicit, tempo_range;
